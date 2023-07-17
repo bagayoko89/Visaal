@@ -3,6 +3,9 @@
 #include <MQTT.h>
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
+#include "freertos/FreeRTOS.h"
+
+
 
 
 // attribution des broches de la carte------------------------------------------------------
@@ -17,6 +20,11 @@ const int gaugeurine = 34;  //39
 const int alerte = 32;
 const int alerteWifi = 33;
 char soft_ap_ssid[16];
+
+const int nbPassages = 2; // Nombre de passages requis de 0 à 1
+const unsigned long delaiMax = 5000; // Délai maximum en millisecondes
+int passageCount = 0; // Compteur de passages
+unsigned long dernierPassage = 0; // Temps du dernier passage
 
 
 float facteurdecalibrationjaugeurine = 409; //662.290;  //408.138;//796.478;//844.114;  //632.88
@@ -42,6 +50,7 @@ int etatcollecteur;
 bool commandeExecutee = false;
 bool etataspiration=false;
 bool etat_envoie=false;
+bool etat_desinf=false;
 
 HX711 scale_urine;
 HX711 scale_eau;
@@ -148,10 +157,9 @@ void loop() {
   Serial.println(niveaureservoirurineprecedent);
 
   etatcollecteur = digitalRead(collecteur);
-  unsigned long currenttemps=millis();
 
-  if (etatcollecteur == 0) {
-    if (!commandeExecutee) {
+  if (etatcollecteur == 0 ) {
+    if (!commandeExecutee ) {
       
       // Exécuter la commande pendant une durée déterminée
       unsigned long startTime = millis(); // Temps de début
@@ -194,7 +202,7 @@ void loop() {
 
     while (ancienneCommandeExecutee && (scale_eau.get_units()+236)>=seuilreservoireau && (scale_urine.get_units()-481)<seuilreservoirurine ) {
       digitalWrite(rincage, HIGH);
-      delay(3 * 1000);
+      delay(5 * 1000);
       digitalWrite(rincage, LOW);
       delay(500);
       digitalWrite(aspiration, HIGH);
@@ -236,7 +244,7 @@ void loop() {
     String jsonString;
     serializeJson(jsonDocument, jsonString);
     client.publish("/visaal/poche-eau", jsonString);
-    if (millis() - dernierTempsEnvoie >= 10000) {
+    if (millis() - dernierTempsEnvoie >= 15000) {
     etat_envoie = false;
   }
 
@@ -248,7 +256,7 @@ void loop() {
   Serial.print(" niveau reservoire eau à instant t: ");
   Serial.println(reservoir);
 
-  if((scale_eau.get_units()+236)<seuilreservoireau || (scale_urine.get_units()-481)>seuilreservoirurine){
+  if(((scale_eau.get_units()+236)<seuilreservoireau &&etatcollecteur==1) || (scale_urine.get_units()-481)>seuilreservoirurine){
     //client.publish("/hello", "alerte niveau eau ou niveau urine");
     digitalWrite(alerte, HIGH);
     delay(500);
@@ -274,6 +282,45 @@ void loop() {
     }
   }
   startTime = millis();
+
+  // Désinfection
+ if((scale_eau.get_units()+236)<seuilreservoireau){
+  if (etatcollecteur == 0 ) {
+    //etat_desinf=true;
+    unsigned long tempsActuel = millis();
+    if (tempsActuel - dernierPassage < delaiMax) {
+      passageCount++;
+      Serial.print(" le temps est : ");
+      Serial.println(tempsActuel - dernierPassage);
+      dernierPassage = tempsActuel;
+    } else {
+      // Réinitialiser le compteur si le délai est dépassé
+      passageCount = 1;
+      dernierPassage = tempsActuel;
+    }
+  }}
+
+  if (passageCount >= nbPassages){
+    digitalWrite(aspiration, HIGH);
+    delay(7*1000);
+    digitalWrite(aspiration, LOW);
+    delay(1000);
+    for(int i=0; i<2;i++){
+    digitalWrite(rincage, HIGH);
+    delay(5 * 1000);
+    digitalWrite(rincage, LOW);
+    delay(1000);
+    digitalWrite(aspiration, HIGH);
+    delay(8 * 1000);
+    digitalWrite(aspiration, LOW);
+    delay(1000);}
+    passageCount = 1;
+
+  }
+
+ 
+
+
 
   
 
